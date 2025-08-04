@@ -1,0 +1,22 @@
+{
+  "name": "server-session",
+  "version": "1.0.0",
+  "main": "server-session.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server-session.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "body-parser": "^1.20.2",
+    "connect-redis": "^7.1.0",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "redis": "^4.6.13"
+  }
+}
