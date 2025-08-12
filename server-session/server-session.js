@@ -3,6 +3,7 @@ const redis = require('redis');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
 const bodyParser = require('body-parser');
+const client = require('prom-client'); // Prometheus client for metrics
 
 const app = express();
 const port = 3000;
@@ -16,18 +17,54 @@ const redisClient = redis.createClient({
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 redisClient.connect();
 
-// Import RedisStore after Redis client is created
-const RedisStore = require('connect-redis').default;
+// Prometheus metrics setup
+const register = new client.Registry();
+client.collectDefaultMetrics({ register }); // Collect default metrics (CPU, memory)
+const httpRequestDuration = new client.Histogram({
+    name: 'http_request_duration_seconds',
+    help: 'Duration of HTTP requests in seconds',
+    labelNames: ['method', 'route', 'code'],
+    buckets: [0.1, 0.3, 0.5, 1, 3, 5] // Latency buckets in seconds
+});
+const httpRequestsTotal = new client.Counter({
+    name: 'http_requests_total',
+    help: 'Total number of HTTP requests',
+    labelNames: ['method', 'route', 'code']
+});
+register.registerMetric(httpRequestDuration);
+register.registerMetric(httpRequestsTotal);
 
 // Middleware
 app.use(bodyParser.json());
 app.use(session({
-    store: new RedisStore({ client: redisClient }),
-    secret: 'your-secret-key',
+    store: new (require('connect-redis').default)({ client: redisClient }),
+    secret: 'thesis-secret-123',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 1000 * 60 * 60 } // 1 hour
+    cookie: { 
+        secure: false, // Set to false for localhost testing
+        httpOnly: true, 
+        sameSite: 'strict', 
+        maxAge: 1000 * 60 * 60 // 1 hour
+    }
 }));
+
+// Prometheus metrics endpoint
+app.get('/metrics', async (req, res) => {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+});
+
+// Middleware to track request metrics
+app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        const duration = (Date.now() - start) / 1000; // Convert to seconds
+        httpRequestDuration.labels(req.method, req.path, res.statusCode).observe(duration);
+        httpRequestsTotal.labels(req.method, req.path, res.statusCode).inc();
+    });
+    next();
+});
 
 // Registration endpoint
 app.post('/register', async (req, res) => {
@@ -38,22 +75,19 @@ app.post('/register', async (req, res) => {
     }
 
     try {
-        // Check if user exists
         const existingUser = await redisClient.get(`user:${username}`);
         if (existingUser) {
             return res.status(400).json({ error: 'Username already exists' });
         }
 
-        // Generate new user ID
         const userId = await redisClient.incr('nextUserId');
-        
-        // Hash password and store user data
         const hashedPassword = await bcrypt.hash(password, 10);
         const userData = JSON.stringify({ id: userId, password: hashedPassword });
         await redisClient.set(`user:${username}`, userData);
         
-        res.status(201).json({ message: `User ${username} registered successfully`, userId: userId });
+        res.status(201).json({ message: `User ${username} registered successfully`, userId });
     } catch (error) {
+        console.error('Registration error:', error);
         res.status(500).json({ error: 'Registration failed' });
     }
 });
@@ -79,17 +113,31 @@ app.post('/login', async (req, res) => {
         }
 
         req.session.user = { username, id };
-        res.json({ message: 'Login successful', username, password, userId: id });
+        res.json({ message: 'Login successful', sessionId: req.sessionID, userId: id });
     } catch (error) {
+        console.error('Login error:', error);
         res.status(500).json({ error: 'Login failed' });
     }
 });
+
+/*
+
+// Protected endpoint
+app.get('/protected', (req, res) => {
+    if (req.session.user) {
+        res.json({ message: 'Authenticated', user: req.session.user });
+    } else {
+        res.status(401).json({ error: 'Unauthorized' });
+    }
+});
+*/
 
 // Logout endpoint
 app.post('/logout', (req, res) => {
     if (req.session.user) {
         req.session.destroy((err) => {
             if (err) {
+                console.error('Logout error:', err);
                 return res.status(500).json({ error: 'Logout failed' });
             }
             res.json({ message: 'Logout successful' });
