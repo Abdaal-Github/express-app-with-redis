@@ -30,4 +30,4 @@ async function createUsers(numUsers) {
     console.log(`Completed registration attempts for ${numUsers} users`);
 }
 
-createUsers(1000); // Create 1000 users for testing
+createUsers(500); // Create 1000 users for testing
