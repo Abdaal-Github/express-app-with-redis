@@ -36,8 +36,13 @@ register.registerMetric(httpRequestsTotal);
 // Middleware
 app.use(express.json());
 
-// Metrics middleware
+// Metrics middleware - MUST come BEFORE routes
 app.use((req, res, next) => {
+    // Skip metrics collection for Prometheus scraping to avoid noise in Grafana
+    if (req.path === '/metrics') {
+        return next();
+    }
+    
     const start = Date.now();
     res.on('finish', () => {
         const duration = (Date.now() - start) / 1000;
@@ -53,9 +58,16 @@ app.get('/metrics', async (req, res) => {
     res.end(await register.metrics());
 });
 
+// Helper to support both lowercase and uppercase field names from clients (e.g., JMeter)
+function extractCredentialsFromBody(body) {
+    const username = body.username ?? body.Username;
+    const password = body.password ?? body.Password;
+    return { username, password };
+}
+
 // Registration endpoint
 app.post('/register', async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password } = extractCredentialsFromBody(req.body);
     if (!username || !password) {
         return res.status(400).json({ error: 'Username and password are required' });
     }
@@ -77,7 +89,7 @@ app.post('/register', async (req, res) => {
 
 // Login endpoint
 app.post('/login', async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password } = extractCredentialsFromBody(req.body);
     if (!username || !password) {
         return res.status(400).json({ error: 'Username and password are required' });
     }
@@ -91,7 +103,7 @@ app.post('/login', async (req, res) => {
         if (!isValid) {
             return res.status(401).json({ error: 'Invalid username or password' });
         }
-        const token = jwt.sign({ username, id }, 'thesis-secret-123', { expiresIn: '1h' });
+        const token = jwt.sign({ username, id }, 'thesis-secret-123', { algorithm: 'HS256', expiresIn: '1h' });
         res.json({ message: 'Login successful', token, userId: id });
     } catch (error) {
         console.error('Login error:', error);
@@ -110,9 +122,12 @@ app.get('/protected', (req, res) => {
         res.json({ message: 'Authenticated', user });
     } catch (error) {
         console.error('Protected endpoint error:', error);
+       // res.status(401).json({ error: 'Unauthorized' });
         res.status(401).json({ error: 'Invalid or expired token' });
     }
 });
+
+
 
 // Logout endpoint
 app.post('/logout', (req, res) => {

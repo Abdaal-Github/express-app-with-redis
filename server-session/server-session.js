@@ -49,13 +49,9 @@ app.use(session({
     }
 }));
 
-// Prometheus metrics endpoint
-app.get('/metrics', async (req, res) => {
-    res.set('Content-Type', register.contentType);
-    res.end(await register.metrics());
-});
 
-// Middleware to track request metrics
+
+// Middleware to track request metrics - MUST come BEFORE routes
 app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
@@ -66,9 +62,24 @@ app.use((req, res, next) => {
     next();
 });
 
+// Prometheus metrics endpoint
+app.get('/metrics', async (req, res) => {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+});
+
+
+
+// Helper to support both lowercase and uppercase field names from clients (e.g., JMeter)
+function extractCredentialsFromBody(body) {
+    const username = body.username ?? body.Username;
+    const password = body.password ?? body.Password;
+    return { username, password };
+}
+
 // Registration endpoint
 app.post('/register', async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password } = extractCredentialsFromBody(req.body);
     
     if (!username || !password) {
         return res.status(400).json({ error: 'Username and password are required' });
@@ -94,7 +105,7 @@ app.post('/register', async (req, res) => {
 
 // Login endpoint
 app.post('/login', async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password } = extractCredentialsFromBody(req.body);
     
     if (!username || !password) {
         return res.status(400).json({ error: 'Username and password are required' });
@@ -120,7 +131,7 @@ app.post('/login', async (req, res) => {
     }
 });
 
-/*
+
 
 // Protected endpoint
 app.get('/protected', (req, res) => {
@@ -130,7 +141,7 @@ app.get('/protected', (req, res) => {
         res.status(401).json({ error: 'Unauthorized' });
     }
 });
-*/
+
 
 // Logout endpoint
 app.post('/logout', (req, res) => {
